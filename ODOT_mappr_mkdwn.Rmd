@@ -1,0 +1,91 @@
+---
+title: "I-205 DTA Count Database"
+author: "Mike Gaunt \n michael.gaunt@wsp.com"
+output: html_document
+
+
+---
+
+<style type="text/css">
+.main-container {
+  max-width: 1800px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+suppressMessages({ 
+  suppressWarnings({
+    source("./R/ODOT_data_mappr.R")
+  })
+})
+```
+
+## Data Location Map
+***
+
+### Desc. and How to Use  
+The below map is interactive:    
+
+* navigation can be performed with your mouse    
+* layers can be changed via the "layer box" (top left)   
+* base map can be changed via the "layer box" (top left)   
+
+
+```{r echo=FALSE, fig.width=15, fig.height=8}
+# plot_boi
+lf
+```
+
+
+
+## {.tabset}
+
+### Plots
+```{r, fig.width=15, echo=FALSE}
+# ODOT_plots
+```
+
+### Data
+```{r echo=FALSE}
+# ODOT_kable 
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
