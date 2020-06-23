@@ -18,10 +18,12 @@ library(dplyr)
 library(readxl)
 library(stringr)
 library(spdplyr)
+library(tidyverse)
 library(tmap)
 library(leaflet)
 library(lubridate)
 library(ggplot2)
+library(janitor)
 
 #path and data set-up~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -58,26 +60,32 @@ index_count_columns = c("time", "Total", "Motor_Bikes", "Cars_Trailers",
                         ">6 Axle Double", "<6 Axle Multi", "6 Axle Multi", ">6 Axle Multi") %>%  
   str_replace_all(" ", "_")
 
-#removing non-important rows
-tmp = county[str_detect(name1, "PM") | 
-                  str_detect(name1, "AM") |
-                  str_detect(name1, "LOCATION"),]
+tmp_counts = county[str_detect(name1, "PM") | 
+                      str_detect(name1, "AM") |
+                      str_detect(name1, "LOCATION"),]
 
-#makes new columns 
-# first - paste all important signigiers into single "raw" column
-# second - breaks out components from raw 
 tmp = tmp %>%  
   .[str_detect(name1, "LOCATION"), 
     `:=`(raw = paste0(name4, name5, name20, name21, name22, name23, 
                       name24, name25, name26, 
                       name27, name28, name45, name46, 
                       name47))] %>%
-  data.table() %>% 
+  data.table() 
+
+test = bind_cols(tmp_counts, tmp_counts %>%  
+                   unite("raw")) %>% 
+  .[!str_detect(raw, "LOCATION"), `:=`(raw = NA)] %>% 
+  .[,`:=`(raw = raw %>%  
+            str_remove_all("_NA")),] %>% 
+  fill(raw, .direction = "down") %>% 
+  data.table()
+
+test = test %>% 
   .[,`:=`(Location = raw %>% 
-            gsub("\r\n.*","\\1", .) %>% 
+            gsub("\r\n:.*","\\1", .) %>% 
             gsub(".*:","\\1", .),
           Lat = raw %>% 
-            gsub("-.*","\\1", .) %>% 
+            gsub(",.*","\\1", .) %>% 
             gsub(".*\r\n:","\\1", .) %>%
             str_remove("N") %>%
             str_remove(",") %>%  
@@ -89,52 +97,54 @@ tmp = tmp %>%
             str_remove("W") %>% 
             str_trim() %>% 
             as.numeric(), 
-          Date = raw %>% 
+          Date = test$raw %>% 
             gsub(".*Site:","\\1", .) %>% 
             str_trim() %>% 
             str_sub(start = 11) %>% 
+            str_remove_all("[[:alpha:]]") %>%  
+            gsub("_.*", "\\1", .) %>% 
+            str_remove_all("\r\n") %>% 
+            parse_date_time("mdy"),
+          Heading = test$raw %>% 
+            gsub(".*Site:","\\1", .) %>%
+            str_remove_all("[:digit:]") %>%
             gsub("\r\n.*","\\1", .) %>% 
-            mdy(),
+            str_trim() %>% 
+            as_factor() %>%
+            fct_recode(Southbound = "SB",
+                       Northbound = "NB",
+                       Eastbound = "EB",
+                       Westbound = "WB", 
+                       Both = ""),
           Type = raw %>%  
             str_extract(index_type_extract))] 
-
-#fills out rows 
-tmp = tmp %>%  
-  fill(Location, .direction = "down") %>% 
-  fill(Lat, .direction = "down") %>%  
-  fill(Long, .direction = "down") %>%  
-  fill(Date, .direction = "down") %>% 
-  fill(Type, .direction = "down")  %>% 
-  data.table()
 
 # filters rows for 24 hour classification per location
 # filters out non-count rows 
 # filters for only important columns - currently only grapping total counts
-tmp_1 = tmp %>% 
+tmp_1 = test %>% 
   .[str_detect(Type, "24"),] %>%  
-  .[!is.na(name10)] %>% 
+  .[!is.na(name10)] %>%
+  remove_empty("cols") %>% 
+  data.table() %>% 
   .[,`:=`(Timestamp = paste(Date, name1) %>% 
-            parse_date_time("ymd HM p"))] %>%
-  remove_empty("cols")
+            parse_date_time("ymd IMOp"))]
 
 # renames columns 
 colnames(tmp_1)[1:15] = index_count_columns
 
 #final DF 
 extracted_clackamas_data = tmp_1 %>%  
-  .[,-c("namerow", "time", "Date")] %>% 
-  melt.data.table(measure.vars = index_count_columns[-1], 
+  .[,-c("raw", "namerow", "time", "Date")] %>% 
+  melt.data.table(measure.vars = index_count_columns[-c(1,2)], 
                   value.name = "Count", variable.name = "Veh_Type") %>%  
   .[,`:=`(SRC = "County", 
           Count = as.numeric(Count),
-          Directionality = "NA",
+          Directionality = ifelse(Heading == "Both", "Bidirectional", "Unidirectional"),
           Count_Fidelity = "Hour", 
-          Current_Status = "kept", 
-          Veh_Data = "Yes")]
+          Current_Status = "Dropped", 
+          Veh_Data = "Yes")] %>%  
+  .[is.na(Heading), `:=`(Directionality = "Bidirectional")]
 
 extracted_clackamas_data %>%  
   fwrite("./output/extracted_clackamas_data.csv")
-
-
-extracted_clackamas_data %>% 
-  summary()

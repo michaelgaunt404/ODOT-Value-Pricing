@@ -149,7 +149,7 @@ tmp_QCounts = tmp_QCounts %>%
   .[str_detect(x1, "AM|PM")] %>% 
   .[str_length(x1)<10] %>%
   .[,`:=`(Timestamp = paste(Date, x1) %>% 
-            parse_date_time("ymd HM p"))]
+            parse_date_time("ymd IMOp"))]
 
 #cleans only the count data 
 #this is nessessary step

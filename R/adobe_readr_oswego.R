@@ -169,7 +169,7 @@ suppressMessages({
                                                gsub("_.*","\\1", .) %>% 
                                                super_cleanr() %>% 
                                                parse_date_time(c("mdy")) %>%
-                                               as.character())]
+                                               as.character())] 
         
         #cleans resulting count data and fills out remaining columns
         #extends values down to make each row tidy
@@ -182,7 +182,7 @@ suppressMessages({
           .[str_detect(x1, "AM|PM")] %>% 
           .[str_length(x1)<10] %>%
           .[,`:=`(Timestamp = paste(Date, x1) %>% 
-                    parse_date_time("ymd HM p"))]
+                    parse_date_time("ymd IMOp"))]
         
         #cleans only the count data 
         #this is nessessary step
@@ -263,7 +263,7 @@ suppressMessages({
                   Turn_Type = gsub(".*_", "\\1",variable), 
                   Location = tmp_info[,1], 
                   Timestamp = paste(tmp_info[,2], time) %>% 
-                    parse_date_time("mdy HM p"), 
+                    parse_date_time("mdy IMOp"), 
                   SRC = "ATD", 
                   filename = data_files[i, location])]
       }
@@ -293,5 +293,3 @@ extracted_oswego_data = extracted_location_data %>%
 extracted_oswego_data %>%  
   fwrite("./output/extracted_oswego_data.csv")
 
-
-extracted_oswego_data  %>% visdat::vis_dat()

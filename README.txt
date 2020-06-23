@@ -17,7 +17,14 @@ HOW TO USE
 \/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
 Everything in this folder is self contained. 
 
-IMPORTANT ITEMS:::::
+IMPORTANT ITEMS:::::DATA
+\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
+Data from external sources are kept in the data folder.
+Data generated for this work - eg manually sourced gps coordinates or output files - are contained in the output folder. 
+
+IMPORTANT ITEMS:::::SCRIPTS
+\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
+
 ODOT_mappr_mkdwn.RMD
 |-> sources scripts in R folder in order to 
 |-> intended to be lightweight

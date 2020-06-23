@@ -42,8 +42,22 @@ traffic_study_cove = read_excel("./data/Traffic_Studies/converted/cove_and_TIA9.
   clean_names() %>% 
   remove_empty("cols") 
 
-#data inport~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+data_locations = fread("./output/manual_gps_extracts/data_locations_cove.csv") %>% 
+  setnames(old = "files", new = "Location")
+
+#data munging~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~GPS clean-up
+data_locations = data_locations %>% 
+  .[,`:=`(Lat = coordinate %>% 
+            gsub(",.*","\\1", .) %>%  
+            as.numeric(),
+          Long = coordinate %>% 
+            gsub(".*,","\\1", .) %>%  
+            as.numeric())] %>%  
+  .[, .(Location, Lat, Long)]
+
+#~~~~~~~~~~~~~~~~~~~extraction
 traffic_study_cove = traffic_study_cove %>% 
   data.table() %>% 
   .[str_detect(x1, "LOCATION:"), `:=`(Location = x1 %>%  
@@ -55,8 +69,7 @@ traffic_study_cove = traffic_study_cove %>%
                                           gsub("DATE.*", "", .) %>%  
                                           str_remove("CITY/STATE:"),
                                         Date = x1 %>%  
-                                          gsub(".*DATE:", "", .) 
-  )] %>%
+                                          gsub(".*DATE:", "", .))] %>%
   .[,`:=`(City_State = lead(City_State), 
           Date = lead(Date))] 
 
@@ -64,6 +77,7 @@ traffic_study_cove = traffic_study_cove %>%
   fill(c("Location", "City_State", "QC_Job", "Date"), .direction = "down") %>%  
   data.table()
 
+#~~~~~~~~~~~~~~~~~~~colnames set-up
 index_row_colnames = traffic_study_cove$x1 %>%  
   str_which("\\(")
 
@@ -89,22 +103,19 @@ tmp_colnames = tmp_colnames %>%
   .[,`:=`(Col_seq = 1)] %>% 
   .[,`:=`(Col_seq = cumsum(Col_seq)), by = Location] %>% 
   .[,`:=`(Col_seq = paste0("V", Col_seq))] %>% 
-  .[,.(Location, Road, Turn_Type, Heading, Col_seq)] %>%   print()
+  .[,.(Location, Road, Turn_Type, Heading, Col_seq)] 
 
-
+#~~~~~~~~~~~~~~~~~~~count munging
 extracted_counts_raw = traffic_study_cove %>% 
   .[str_detect(x1, "AM|PM") &
       !str_detect(x1, "Peak|Report"),] %>%  
-  .[,`:=`(Timestamp = gsub("(AM|PM).*", "\\1", x1) %>% 
+  .[,`:=`(Timestamp = gsub("(AM|PM).*", "\\1", x1) %>%
             paste(Date, .) %>%
-            parse_date_time(., "mdy HM p"),
+            parse_date_time(., "mdy IMOp")
+          ,
           Data = gsub(".*AM", "\\1", x1) %>% 
             gsub(".*PM", "\\1", .) %>% 
             str_trim("both") )] 
-
-extracted_counts_raw$Timestamp %>% 
-  gsub(".*,", "", .) %>% 
-  parse_date_time(., "mdy HM p")
 
 extracted_counts = extracted_counts_raw[,7] %>% 
   data.table() %>%  
@@ -121,19 +132,25 @@ extracted_counts = extracted_counts_raw[,7] %>%
   melt.data.table(id.vars = c('Location', 'QC_Job', 'City_State', "Timestamp"), 
                   variable.name = "Col_seq", 
                   value.name = "Count") %>%  
-  .[order(Location, Timestamp)]   
+  .[order(Location, Timestamp)] 
 
-extracted_meyers_cove = extracted_counts %>%  
+extracted_cove_data = extracted_counts %>%  
   merge.data.table(tmp_colnames, 
                    by = c("Location", "Col_seq")) %>% 
-  .[,`:=`(SRC = "QC", 
+  .[, -c("Col_seq")] %>%
+  .[,`:=`(Location = str_trim(Location, "both"),
+          SRC = "QC", 
           Type = "Turn_Counts",
           Directionality = "Unidirectional", 
           Current_Status = "Kept", 
           Count_Fidelity = "5-min", 
-          Veh_Data = "No")]
-  
+          Veh_Data = "No")] %>% 
+  merge.data.table(., data_locations, 
+                   by = c("Location"), 
+                   all = T)
 
+extracted_cove_data %>%  
+  fwrite("./output/extracted_cove_data.csv")
 
 
 
