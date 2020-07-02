@@ -42,6 +42,8 @@ odot_counts_og_shapefile = readOGR(file_odot,
                                    "ODOT_TCM_wVolume",
                                    verbose = F)
 
+odot_counts_og_shapefile$ID
+
 #wrangling~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~direction info

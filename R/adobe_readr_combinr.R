@@ -22,7 +22,6 @@ library(leaflet)
 library(lubridate)
 library(janitor)
 
-
 #path and data set-up~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 setwd("~/")
@@ -56,7 +55,8 @@ CED_raw = bind_rows(extracted_oswego_data,
   .[SRC != "ODOT",`:=`(Current_Status = "Dropped")] %>% 
   .[,`:=`(Floor_Timestamp = gsub("[[:alpha:]]", ' ', Timestamp) %>% 
             as_datetime() %>% 
-            floor_date(unit = "hours"))] 
+            floor_date(unit = "hours"))] %>% 
+  unique()
 
 CED_raw[, -c("Floor_Timestamp")] %>%
   fwrite("./output/CED_raw.csv")

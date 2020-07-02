@@ -1,5 +1,5 @@
 ---
-title: "I-205 DTA Count Database"
+title: "I-205 DTA Count Database Map"
 author: "Mike Gaunt \n michael.gaunt@wsp.com"
 output: html_document
 
@@ -18,44 +18,53 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r echo=FALSE, warning=FALSE, message=FALSE}
-suppressMessages({ 
+```{r echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+suppressMessages({
   suppressWarnings({
-    source("./R/ODOT_data_mappr.R")
+    source("./R/mappr_link_extractr.R")
+  })
+})
+
+suppressMessages({
+  suppressWarnings({
+    source("./R/mappr_full_data_coverage.R")
   })
 })
 ```
 
-## Data Location Map
+### Description and How to Use  
 ***
+The two maps below depict the data currently available in the I205 DTA Count Database.   
+They display the location of the data and the DTA model links which are associated with each data location.    
+The first map displays the information by data source, the second by the year the data was acquired - these maps can be navigated to by changing the tab.    
 
-### Desc. and How to Use  
-The below map is interactive:    
+Both maps are interactive and have the same layers.   
 
-* navigation can be performed with your mouse    
+* navigation can be performed with your mouse by clicking on the map and dragging
+* zoom in and out can be performed with your mouse or with the zoom buttons (top left) 
+* layers are turned on or off defualt
 * layers can be changed via the "layer box" (top left)   
-* base map can be changed via the "layer box" (top left)   
+* base map can be changed via the "layer box" (top left) 
 
-
-```{r echo=FALSE, fig.width=15, fig.height=8}
-# plot_boi
-lf
-```
-
-
+***
 
 ## {.tabset}
 
-### Plots
-```{r, fig.width=15, echo=FALSE}
-# ODOT_plots
+### Data Source
+```{r echo=FALSE, fig.width=15, fig.height=8}
+lf_links
 ```
 
-### Data
-```{r echo=FALSE}
-# ODOT_kable 
+### Data Acquisition Year
+```{r echo=FALSE, fig.width=15, fig.height=8}
+lf_links_color
 ```
 
+
+```{r echo=FALSE, fig.width=15, fig.height=8}
+### Full Subarea Map
+# lf
+```
 
 
 

@@ -8,7 +8,6 @@
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-
 PURPOSE OF THIS DOCUMENT
 \/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
 This document is details the work performed on the ODOT value pricing data work.
@@ -31,13 +30,20 @@ ODOT_mappr_mkdwn.RMD
 |-------> sources made map from ODOT_data_mappr.R
 |-------> RMD files should pull from this
 
-ODOT_data_mappr.R
+ODOT_data_mappr_full.R
 |-> performs all mapping operation
 |-------> data location mapping
 |-------> spatial filtering of points 
 |-------> link extraction for kept points
 |-> reporting metrics
 |-------> currently unused 
+
+mappr_utility.R
+mappr_link_extractr.R
+mappr_full_data_coverage.R
+|-> seprate files broken-out from ODOT_data_mappr_full.R
+|-> broken out to make each script smaller
+|-> broken out to make each script responsible for single action
 
 adobe_readr_combinr.R
 |-> combines the data from all adobe_readr_** files
