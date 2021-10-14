@@ -29,6 +29,8 @@ library(spdplyr)
 library(lubridate)
 library(readxl)
 library(sf)
+library(leaflet)
+library(shiny)
 
 suppressMessages({
   tmap_mode('view')
@@ -36,12 +38,14 @@ suppressMessages({
 
 #path and data set-up~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# setwd("~/")
-# rstudioapi::getSourceEditorContext()$path %>%
-#   as.character() %>%
-#   gsub("R.*","\\1", .) %>%
-#   path.expand() %>%
-#   setwd()
+if (!exists("BEING_SOURCED_FROM_SOMEWHERE")){
+  setwd("~/")
+  rstudioapi::getSourceEditorContext()$path %>%
+    as.character() %>%
+    gsub("R.*","\\1", .) %>%
+    path.expand() %>%
+    setwd()
+}
 
 #data inport~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -115,7 +119,6 @@ spatializeR = function(data){
   return(spatial_data)
 }
 
-
 mapatizeR = function(tm_shape_object, color){
   map = tm_shape_object +
     tm_dots(col = tmp_color,
@@ -170,13 +173,13 @@ Sub_Area = Sub_Area %>%
   spTransform(., CRS(default_projection))
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~extracted data
-Kept_Extracted_Data = CED_init_filter_and_agg %>% 
+  Kept_Extracted_Data = CED_init_filter_and_agg %>% 
   .[!is.na(Lat)] %>% 
   .[Current_Status == "Kept"] %>% 
   simplifizeR() %>% 
   spatializeR() 
 
-Kept_Extracted_Data = intersect(Kept_Extracted_Data, Sub_Area)
+Kept_Extracted_Data = raster::intersect(Kept_Extracted_Data, Sub_Area)
 
 Kept_Extracted_Data@data[, c('Location', 'Current_Status')] %>%  
   fwrite(., "./output/Kept_Extracted_Data_Lookup.csv")
@@ -229,7 +232,7 @@ Metro = Metro %>%
 Metro = Metro %>% 
   spTransform(., CRS(default_projection))
 
-Kept_Metro_Data = intersect(Metro, Sub_Area)
+Kept_Metro_Data = raster::intersect(Metro, Sub_Area)
 
 Dropped_Metro_Data = Metro %>% 
   spdplyr:::filter.Spatial(ID %notin% unique(Kept_Metro_Data$ID))

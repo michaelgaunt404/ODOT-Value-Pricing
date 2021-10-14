@@ -14,12 +14,14 @@ library(magrittr)
 
 #path and data set-up~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# setwd("~/")
-# rstudioapi::getSourceEditorContext()$path %>%
-#   as.character() %>%
-#   gsub("R.*","\\1", .) %>%
-#   path.expand() %>%
-#   setwd()
+if (!exists("BEING_SOURCED_FROM_SOMEWHERE")){
+  setwd("~/")
+  rstudioapi::getSourceEditorContext()$path %>%
+    as.character() %>%
+    gsub("R.*","\\1", .) %>%
+    path.expand() %>%
+    setwd()
+}
 
 #sourcing script~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -106,3 +108,30 @@ lf = master_plot %>%
   leaflet::addMarkers(-122.603654, 45.364644, popup = "Abernathy Bridge")
 
 print("mappr_full_data_coverage.R run complete")
+
+
+
+mapview(breweries, zcol = c("brewery", "village", "founded"))
+
+# install.packages("mapview")
+# install.packages("dplyr")
+# install.packages("magrittr")
+library(mapview)
+library(dplyr)
+library(magrittr)
+
+names = breweries %>%  
+  select(brewery)
+
+village = breweries %>%  
+  select(village)
+
+`Complicated Name_layer` = breweries %>%  
+  select(number.of.types)
+
+mapview(names, legend = F) + 
+  mapview(village, legend = F) +
+  mapview(`Complicated Name_layer`, legend = F) 
+  
+
+

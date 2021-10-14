@@ -2,6 +2,7 @@
 title: "I-205 DTA Count Database Map"
 author: "Mike Gaunt \n michael.gaunt@wsp.com"
 output: html_document
+# runtime: shiny
 
 
 ---
@@ -16,7 +17,10 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+BEING_SOURCED_FROM_SOMEWHERE = T
 ```
+
 
 ```{r echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
 suppressMessages({
@@ -25,11 +29,11 @@ suppressMessages({
   })
 })
 
-suppressMessages({
-  suppressWarnings({
-    source("./R/mappr_full_data_coverage.R")
-  })
-})
+# suppressMessages({
+#   suppressWarnings({
+#     source("./R/mappr_full_data_coverage.R")
+#   })
+# })
 ```
 
 ### Description and How to Use  

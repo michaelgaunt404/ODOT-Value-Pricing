@@ -1,0 +1,860 @@
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#
+# Main mapping script for ODOT I205 data QC process.
+#
+# By: mike gaunt, michael.gaunt@wsp.com
+#
+# README: script pulls from multiple data streams
+#-------- script performs applies filtering to keep or drop files
+#-------- script maps locations
+#
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#package install and load~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+library(ggmap) #ggplot2 for spatial 
+library(tmap) #vis for maps (ggmap alternative)
+library(rgdal) #for inport/outport
+library(rgeos) #for spatial analysis operations 
+library(maptools) #provides mapping functions
+library(dplyr) #data manipulation 
+library(kableExtra)
+library(magrittr)
+library(raster) #geo-measurements 
+library(data.table)
+library(spdep)
+library(tidyverse)
+library(ggpubr)
+library(spdplyr)
+library(lubridate)
+library(readxl)
+library(sf)
+
+tmap_mode('view')
+
+#path and data set-up~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+setwd("~/")
+rstudioapi::getSourceEditorContext()$path %>%
+  as.character() %>%
+  gsub("R.*","\\1", .) %>%
+  path.expand() %>%
+  setwd()
+
+#data inport~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+CED_init_filter_and_agg = fread("./output/CED_init_filter_and_agg.csv", 
+                                stringsAsFactors = F) %>% 
+  .[,`:=`(Floor_Timestamp = gsub("[[:alpha:]]", ' ', Floor_Timestamp) %>% 
+            as_datetime())]
+
+potential_data_pickups = read_excel("./output/potential_data_pickups.xlsx") %>% 
+  data.table() %>% 
+  .[,`:=`(Long = Coordinates %>%
+            gsub(".*,", "", .) %>%
+            as.numeric(),
+          Lat = Coordinates %>%
+            gsub(",.*", "", .)  %>%
+            as.numeric(), 
+          Year = year(Date), 
+          SRC = "Potential", 
+          Date = as_date(Date), 
+          Current_Status = "Kept")]
+
+selected_out_focus_area = read_excel("./output/selected_out_focus_area.xlsx") %>% 
+  data.table() 
+
+focus_area_coordinates = read_excel("./output/manual_gps_extracts/test123.xlsx", 
+                                    col_names = T) %>% 
+  data.table() %>% 
+  .[,`:=`(Long = Coordinates %>%
+            gsub(".*,", "", .) %>%
+            as.numeric(),
+          Lat = Coordinates %>%
+            gsub(",.*", "", .)  %>%
+            as.numeric())]
+
+file_emme = "./data/TDM_EmmeLink_wCounts"
+Metro = readOGR(file_emme, 
+                "emme_link_wCounts",
+                verbose = F)
+
+file_subarea = "./data/I205_subarea_links"
+subarea_raw = rgdal::readOGR(file_subarea, 
+                             "links",
+                             verbose = F)
+
+#data munging~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#mapping utility~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~functions or indexes required for mapping
+`%notin%` <- Negate(`%in%`)
+
+simplifizeR = function(data){
+  simplified_data = data %>% 
+    .[!is.na(Location)] %>% 
+    .[,head(.SD, 1), by = .(Location)] %>%
+    mutate(Date = as_date(Floor_Timestamp),
+           Weekday = lubridate::wday(Floor_Timestamp, label = T,abbr = F),
+           Year = year(Floor_Timestamp))
+  return(simplified_data)
+}
+
+spatializeR = function(data){
+  coor_sp = cbind(data$Long, 
+                  data$Lat) %>%  
+    SpatialPoints() 
+  crs.geo = CRS("+init=epsg:4326") 
+  proj4string(coor_sp) = crs.geo 
+  
+  spatial_data = SpatialPointsDataFrame(coor_sp, 
+                                        data %>% 
+                                          as.data.frame())
+  return(spatial_data)
+}
+
+
+mapatizeR = function(tm_shape_object, color){
+  map = tm_shape_object +
+    tm_dots(col = tmp_color,
+            alpha = 1,
+            id = "Location", 
+            popup.vars=) 
+  return(map)
+}
+
+popup_value = c("Source/Vendor" = "SRC",
+                "Type",
+                "Directionality",
+                'Date',   
+                "Day" = "Weekday",
+                "Count_Precision" = 'Count_Fidelity', 
+                'Veh_Data', 
+                "Current_Status")
+
+# scales::show_col(vapoRwave:::newRetro_palette)
+tmp_color = vapoRwave:::newRetro_palette #[c(1,3,5, 7, 9)]
+
+# projection converts most shapefiles to lat/long projceion
+default_projection = "+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+
+
+#mapping processes~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~subarea 
+#buffers need to be applied in stages to ensure smoothness
+Sub_Area = subarea_raw %>%  
+  st_as_sf() %>% 
+  arrange(-Length) %>%
+  head(2000) %>%
+  st_buffer(dist = 4000) %>%
+  st_union() 
+
+Sub_Area = Sub_Area %>%
+  st_buffer(dist = 6000) 
+
+Sub_Area = Sub_Area %>%
+  st_buffer(dist = 6000) 
+
+Sub_Area = Sub_Area %>%
+  st_buffer(dist = 6000) 
+
+Sub_Area = Sub_Area %>%
+  st_buffer(dist = -22000) 
+
+Sub_Area = Sub_Area %>%
+  as_Spatial() %>% 
+  spTransform(., CRS(default_projection))
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~extracted data
+Kept_Extracted_Data = CED_init_filter_and_agg %>% 
+  .[!is.na(Lat)] %>% 
+  .[Current_Status == "Kept"] %>% 
+  simplifizeR() %>% 
+  spatializeR() 
+
+Kept_Extracted_Data = intersect(Kept_Extracted_Data, Sub_Area)
+
+Kept_Extracted_Data@data[, c('Location', 'Current_Status')] %>%  
+  fwrite(., "./output/Kept_Extracted_Data_Lookup.csv")
+
+# different layers
+QC_Data = Kept_Extracted_Data %>%  
+  filter(SRC == "QC")
+
+ATD_Data = Kept_Extracted_Data %>%  
+  filter(SRC == "ATD")
+  
+Clackamas_Data = Kept_Extracted_Data %>%  
+  filter(SRC == "County")
+
+ODOT_Data = Kept_Extracted_Data %>%  
+  filter(SRC == "ODOT")
+
+# want locations that have been dropped by date and spatial filters 
+Dropped_Extracted_Data = CED_init_filter_and_agg %>% 
+  .[!is.na(Lat)] %>% 
+  .[Location %notin% unique(Kept_Extracted_Data$Location)] %>%  
+  .[,`:=`(Current_Status = "Dropped")] %>%  
+  simplifizeR() %>% 
+  spatializeR() 
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~focus area
+# TODO make this more `form fitting`
+focus_area_poly = cbind(focus_area_coordinates$Long,
+                        focus_area_coordinates$Lat) %>%
+  Polygon()
+focus_area_poly = Polygons(list(focus_area_poly), "Focus_area")
+focus_area_poly = SpatialPolygons(list(focus_area_poly))
+crs.geo = CRS("+init=epsg:4326")
+proj4string(focus_area_poly) = crs.geo
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~subarea roadways
+subarea_sf_network = subarea_raw %>%  
+  st_as_sf() %>% 
+  st_union() 
+
+#making map now to make later mapping faster 
+subarea_sf_network_map = tm_shape(subarea_sf_network) +
+  tm_lines(alpha = .2)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~metro points
+Metro = Metro %>% 
+  spdplyr:::filter.Spatial(CountYr == 9999) %>% 
+  SpatialLinesMidPoints()
+
+Metro = Metro %>% 
+  spTransform(., CRS(default_projection))
+
+Kept_Metro_Data = intersect(Metro, Sub_Area)
+
+Dropped_Metro_Data = Metro %>% 
+  spdplyr:::filter.Spatial(ID %notin% unique(Kept_Metro_Data$ID))
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~raster of combined `kept` points
+raster_extent = raster(ncols=18, nrows=18,
+                       xmn = Sub_Area@bbox[1,1], xmx = Sub_Area@bbox[1,2],
+                       ymn = Sub_Area@bbox[2,1], ymx = Sub_Area@bbox[2,2])
+
+CED_kept_raster <- rasterize(Kept_Extracted_Data, raster_extent, "Location", fun='count')
+
+Metro_kept_raster <- rasterize(Kept_Metro_Data, raster_extent, "ID", fun='count')
+
+Kept_Combined_Data = merge(Metro_kept_raster, CED_kept_raster) 
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~combining all plots
+map_kept_data = tm_shape(QC_Data) +
+  tm_dots(col = tmp_color[1],
+          scale = 2,
+          alpha = 1,
+          id = "Location", 
+          popup.vars = popup_value) +
+  tm_shape(ATD_Data) +
+  tm_dots(col = tmp_color[1],
+          scale = 2,
+          alpha = 1,
+          id = "Location", 
+          popup.vars = popup_value) +
+  tm_shape(Clackamas_Data) +
+  tm_dots(col = tmp_color[1],
+          scale = 2,
+          alpha = 1,
+          id = "Location", 
+          popup.vars = popup_value) + 
+  tm_shape(ODOT_Data) +
+  tm_dots(col = tmp_color[1],
+          scale = 2,
+          alpha = 1,
+          id = "Location", 
+          popup.vars = popup_value) + 
+  tm_shape(Kept_Metro_Data) +
+  tm_dots(col = tmp_color[1],
+          scale = 2,
+          alpha = 1,
+          id = "Location", 
+          popup.vars = "ID") 
+
+map_dropped_data = tm_shape(Dropped_Extracted_Data) +
+  tm_dots(col = tmp_color[6],
+          alpha = 1,
+          id = "Location",
+          popup.vars = popup_value) +
+  tm_shape(Dropped_Metro_Data) +
+  tm_dots(col = tmp_color[6],
+          alpha = 1,
+          id = "Location")
+
+map_base = subarea_sf_network_map +
+  tm_shape(Sub_Area) +
+  tm_polygons(col = tmp_color[7],
+              border.col = tmp_color[7],
+              border.lwd = 3,
+              alpha = 0.05) +
+tm_shape(focus_area_poly) +
+  tm_polygons(col = "#903495",
+              border.col = "#903495",
+              alpha = .1) +
+  tm_shape(Kept_Combined_Data) +
+  tm_raster(alpha = .8, 
+            palette = "-inferno") +
+  tm_add_legend(title = 'Data Inclusion Status',
+                type = 'fill',
+                col = c("#9239F6", "#FF0076"), 
+                labels  = c("Included", "Dropped")) 
+
+master_plot = map_base + map_kept_data + map_dropped_data 
+
+lf = master_plot %>% 
+  tmap_leaflet() %>% 
+  leaflet::hideGroup(c("subarea_sf_network_map",
+                       "Kept_Combined_Data", 
+                       "Dropped_Extracted_Data", 
+                       "Dropped_Metro_Data")) %>% 
+  leaflet::addMarkers(-122.603654, 45.364644, popup = "Abernathy Bridge")
+
+
+#link extraction~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~making SF objects
+subarea_projection = subarea_raw %>%  
+  proj4string()
+
+subarea_network = subarea_raw %>%  
+  st_as_sf() 
+
+Kept_Extracted_Data_SF = Kept_Extracted_Data@data %>%
+  bind_rows(., potential_data_pickups) %>% 
+  spatializeR() %>%
+  st_as_sf() %>%  
+  st_transform(., CRS(subarea_projection)) 
+
+Kept_Metro_Data_SF = Kept_Metro_Data %>%
+  st_as_sf() %>%  
+  st_transform(., CRS(subarea_projection)) %>% 
+  mutate(Location = ID, 
+         SRC = "Metro") %>% 
+dplyr::select(Location, SRC)
+
+focus_area_poly_SF = focus_area_poly %>%  
+  st_as_sf() %>% 
+  st_transform(., CRS(subarea_projection))
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~extracting link directions and headings
+mod_fun <- function(object, x, y){
+  object[x,y]
+}
+
+link_direction_extraction = subarea_network[,c("ID", "geometry")] %>% 
+  group_by(ID) %>% 
+  nest() %>%
+  mutate(coor = map(data, st_coordinates)) %>% 
+  mutate(coor_dim = map(coor, nrow)) %>% 
+  mutate(start_x = map(coor, mod_fun, 1, 1), 
+         end_x = map(coor, mod_fun, coor_dim[[1]], 1),
+         start_y = map(coor, mod_fun, 1, 2), 
+         end_y = map(coor, mod_fun, coor_dim[[1]], 2)) %>% 
+  unnest(cols = c("start_x", 
+                  "end_x",
+                  "start_y", 
+                  "end_y")) %>%  
+  mutate(Heading_EW = end_x-start_x, 
+         Heading_NS = end_y-start_y) %>%  
+  mutate(Primary_Direction = ifelse(abs(Heading_NS) > abs(Heading_EW), 
+                                    ifelse(Heading_NS > 0, "Northbound", "Southbound"), 
+                                    ifelse(Heading_EW > 0, "Eastbound", "Westbound")), 
+         Secondary_Direction = ifelse(abs(Heading_NS) > abs(Heading_EW),
+                                      ifelse(Heading_EW > 0, "Eastbound", "Westbound"),
+                                      ifelse(Heading_NS > 0, "Northbound", "Southbound"))) %>% 
+  .[,c("ID", "start_x", "end_x", "start_y", "end_y",  "Heading_EW", 
+       "Heading_NS", "Primary_Direction", "Secondary_Direction")] %>% 
+  data.frame()  
+
+subarea_network = link_direction_extraction %>% 
+  merge(subarea_network, ., by = "ID") 
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~extracting touching data locations and links 
+# F O R   M E T R O 
+index_link_miss = c(as.character(Kept_Metro_Data_SF$Location))
+link_count_locations_metro = data.table()
+index_link_mapping = c()
+for (i in 1:3){
+  distance = 100 * i
+  
+  proximity_features = Kept_Metro_Data_SF %>% 
+    .[Kept_Metro_Data_SF$Location %in% index_link_miss,] %>% 
+    st_is_within_distance(subarea_network, 
+                          ., 
+                          dist = distance, 
+                          sparse = F) 
+  
+  link_count_locations_metro = bind_rows(link_count_locations_metro, 
+                                    proximity_features %>% 
+                                      data.table() %>%  
+                                      setnames(index_link_miss %>%  
+                                                 as.character()) %>% 
+                                      .[,`:=`(Links = subarea_network$ID, 
+                                              Distance = distance)] %>% 
+                                      melt.data.table(id.vars = c("Links", "Distance"), 
+                                                      value.name = "Touch", 
+                                                      variable.name = "Location") %>%  
+                                      .[Touch == T] %>%  
+                                      .[order(Location, Links)] %>%  
+                                      .[,`:=`(Link_Number = 1)] %>%
+                                      .[,`:=`(Link_Number = cumsum(Link_Number)), by = Location]) 
+  
+  index_link_miss = Kept_Metro_Data_SF$Location %>% 
+    .[which(proximity_features %>%  colSums() == 0)]
+  index_link_mapping = cbind(index_link_mapping, proximity_features) 
+}
+
+index_link_miss = c(Kept_Extracted_Data_SF$Location)
+link_count_locations = data.table()
+index_link_mapping = c()
+for (i in 1:3){
+  distance = 100 * i
+  
+  proximity_features = Kept_Extracted_Data_SF %>% 
+    .[Kept_Extracted_Data_SF$Location %in% index_link_miss,] %>% 
+    st_is_within_distance(subarea_network, 
+                          ., 
+                          dist = distance, 
+                          sparse = F) 
+  
+  link_count_locations = bind_rows(link_count_locations, 
+                                   proximity_features %>% 
+                                     data.table() %>%  
+                                     setnames(index_link_miss %>%  
+                                                as.character()) %>% 
+                                     .[,`:=`(Links = subarea_network$ID, 
+                                             Distance = distance)] %>% 
+                                     melt.data.table(id.vars = c("Links", "Distance"), 
+                                                     value.name = "Touch", 
+                                                     variable.name = "Location") %>%  
+                                     .[Touch == T] %>%  
+                                     .[order(Location, Links)] %>%  
+                                     .[,`:=`(Link_Number = 1)] %>%
+                                     .[,`:=`(Link_Number = cumsum(Link_Number)), by = Location]) 
+  
+  index_link_miss = Kept_Extracted_Data_SF$Location %>% 
+    .[which(proximity_features %>%  colSums() == 0)]
+  index_link_mapping = cbind(index_link_mapping, proximity_features) 
+}
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~extraction to DF
+yolo = Kept_Extracted_Data_SF %>%  
+  merge(., link_count_locations %>% 
+          .[order(Distance, Location, -Link_Number)], by = "Location") %>%  
+  mutate(Year = as.factor(Year))
+
+yolo_potential = yolo %>%  
+  filter(SRC == "Potential")
+
+yolo = yolo %>%  
+  filter(SRC != "Potential") 
+
+SubArea_Network_Data_Links_Potetnial_Purchase = subarea_network %>%  
+  filter(ID %in% yolo_potential$Links)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~making map layers
+index_link_mapping = index_link_mapping %>% 
+  as.integer() %>% 
+  matrix(ncol = ncol(index_link_mapping)) %>% 
+  rowSums() > 0
+
+SubArea_Network_Data_Links = subarea_network[index_link_mapping,] %>%  
+  filter(ID %in% yolo$Links)
+
+#inside Focus Area
+kept_points_inside = st_within(yolo, focus_area_poly_SF, sparse = FALSE)[, 1] %>% 
+  yolo[.,]  
+
+kept_points_outside_filter_pass = yolo %>%  
+  filter(Location %in% selected_out_focus_area$Location)
+
+QC_Data_Inside_FocusArea = kept_points_inside %>%
+  filter(SRC == "QC")
+
+Clackamas_Data_Inside_FocusArea = kept_points_inside %>%
+  filter(SRC == "County")
+
+ATD_Data_Inside_FocusArea = kept_points_inside %>%  
+  filter(SRC == "ATD")
+
+ODOT_Data_Inside_FocusArea = sf:::rbind.sf(kept_points_inside %>%  
+  filter(SRC == "ODOT"), kept_points_outside_filter_pass %>%  
+    filter(SRC == "ODOT"))
+
+Metro_Data_Inside_FocusArea = st_within(Kept_Metro_Data_SF, focus_area_poly_SF, sparse = FALSE)[, 1] %>% 
+  Kept_Metro_Data_SF[.,]
+
+tmp_metro_links = link_count_locations_metro %>% 
+  filter(Location %in% Metro_Data_Inside_FocusArea$Location) %>%  
+  dplyr::select(Links)
+
+Metro_Links_Inside_Focus_Area = subarea_network %>% 
+  filter(ID %in% tmp_metro_links$Links)
+
+Local_Data_Inside_Focus_Area = sf:::rbind.sf(QC_Data_Inside_FocusArea, 
+                                             Clackamas_Data_Inside_FocusArea,
+                                             ATD_Data_Inside_FocusArea, 
+                                             kept_points_outside_filter_pass %>%  
+                                               filter(SRC != "ODOT")) %>%  
+  mutate(SRC = "Local")
+
+Data_Links_Inside_FocusArea = SubArea_Network_Data_Links %>% 
+  filter(ID %in% Local_Data_Inside_Focus_Area$Links |
+           ID %in% ODOT_Data_Inside_FocusArea$Links) %>%  
+  sf:::rbind.sf(., Metro_Links_Inside_Focus_Area)
+
+#outside Focus Area
+kept_points_outside = st_disjoint(yolo, focus_area_poly_SF, sparse = FALSE)[, 1] %>% 
+  yolo[.,]
+
+QC_Data_Outside_FocusArea = kept_points_outside %>%
+  filter(SRC == "QC")
+
+Clackamas_Data_Outside_FocusArea = kept_points_outside %>%
+  filter(SRC == "County")
+
+ATD_Data_Outside_FocusArea = kept_points_outside %>%  
+  filter(SRC == "ATD")
+
+Local_Data_Outside_Focus_Area = sf:::rbind.sf(QC_Data_Outside_FocusArea, 
+                                              Clackamas_Data_Outside_FocusArea,
+                                              ATD_Data_Outside_FocusArea) %>%  
+  mutate(SRC = "Local")
+
+ODOT_Data_Outside_FocusArea = kept_points_outside %>%  
+  filter(SRC == "ODOT")
+
+Metro_Data_Outside_FocusArea = st_disjoint(Kept_Metro_Data_SF, focus_area_poly_SF, sparse = FALSE)[, 1] %>% 
+  Kept_Metro_Data_SF[.,]
+
+tmp_metro_links_out = link_count_locations_metro %>% 
+  filter(Location %in% Metro_Data_Outside_FocusArea$Location) %>%  
+  dplyr::select(Links)
+
+Metro_Links_Outside_Focus_Area = subarea_network %>% 
+  filter(ID %in% tmp_metro_links_out$Links)
+
+Data_Links_Outside_FocusArea = SubArea_Network_Data_Links %>%  
+  filter(ID %notin% Data_Links_Inside_FocusArea$ID) %>%  
+  sf:::rbind.sf(., Metro_Links_Outside_Focus_Area)
+
+#aux 
+Focus_Area = focus_area_poly_SF
+
+Candidate_Local_Data = yolo_potential
+
+Candidate_Local_Data_Links = SubArea_Network_Data_Links_Potetnial_Purchase %>% 
+  filter(ID %in% yolo_potential$Links)
+
+ATR_Data = subarea_network %>%  
+  filter(ID %in% c(18023))
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~link extraction map
+tmp_viridis = viridis::plasma(15)[seq(from = 1, by = 3, length.out = 5 )]
+
+dot_mappr = function(data, i, pop){
+  if (is.numeric(i)){
+    data + 
+      tm_dots(col = tmp_color[i], scale = 3,  popup.vars = pop)
+  } else {
+    data + 
+      tm_dots(col = "Year", scale = 3,  
+              style = "cat",
+              palette = tmp_viridis,
+              breaks = c(2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019),
+              popup.vars = pop,
+              legend.show=FALSE,
+              legend.format=list(fun=function(x) formatC(x, digits=0, format="d")))
+  }
+
+}
+
+line_mappr = function(data, i, size, pop){
+  data + 
+    tm_lines(col = tmp_color[i], lwd = size, popup.vars = pop)
+}
+
+popup_dots = c('SRC', 'Type', 'Road', 
+  'Heading', "Buffer" = 'Distance', 
+  "Link_Number")
+
+popup_lines = c("ID", 
+  "Heading_EW",
+  "Heading_NS", 
+  "Primary_Direction", 
+  "Secondary_Direction")
+
+map_base_links = subarea_sf_network_map + 
+  tm_shape(Focus_Area) + 
+  tm_polygons(alpha = .6)
+
+map_insde_FA =  tm_shape(Local_Data_Inside_Focus_Area) %>% dot_mappr(., 9, popup_value) +
+  tm_shape(ODOT_Data_Inside_FocusArea) %>% dot_mappr(., 6, popup_value) +
+  tm_shape(Metro_Data_Inside_FocusArea) %>% dot_mappr(., 1, "Location") +
+  tm_shape(Data_Links_Inside_FocusArea) %>% line_mappr(., 2, 2, popup_lines) +
+  tm_shape(ATR_Data)  %>% line_mappr(., 8, 2, "ID")
+
+map_outside_FA =  tm_shape(Local_Data_Outside_Focus_Area) %>% dot_mappr(., 9, popup_value) +
+  # tm_shape(ODOT_Data_Outside_FocusArea) %>% dot_mappr(., 6, popup_value) +
+  tm_shape(Metro_Data_Outside_FocusArea) %>% dot_mappr(., 1, "Location") +
+  tm_shape(Data_Links_Outside_FocusArea) %>% line_mappr(., 2, 2, popup_lines) 
+
+map_pickup = tm_shape(Candidate_Local_Data) %>% dot_mappr(., 4, popup_value) +
+  tm_shape(Candidate_Local_Data_Links) %>% line_mappr(., 4, 2, popup_lines)
+
+master_plot_links = map_base_links +
+  map_insde_FA + 
+  map_outside_FA  + 
+  map_pickup +
+  tm_add_legend(title = 'Data Source',
+                type = 'fill',
+                col = c(tmp_color[9], tmp_color[8], tmp_color[6], tmp_color[1], tmp_color[2], tmp_color[4]), 
+                labels  = c("Local Data Counts", "ATR Data", "ODOT Counts", "Metro Data", "Extracted TDA Links", "Candidate Data Sites/Links")) 
+
+lf_links = master_plot_links %>% 
+  tmap_leaflet() %>% 
+  leaflet::hideGroup(c("Local_Data_Outside_Focus_Area", 
+                       "ODOT_Data_Outside_FocusArea",
+                       "Metro_Data_Outside_FocusArea",
+                       "Data_Links_Outside_FocusArea",
+                       "Candidate_Local_Data",
+                       "Candidate_Local_Data_Links")) %>% 
+  leaflet::addMarkers(-122.603654, 45.364644, popup = "Abernethy Bridge")
+
+map_insde_FA_color =  tm_shape(Local_Data_Inside_Focus_Area) %>% dot_mappr(., "y", popup_value) +
+  tm_shape(ODOT_Data_Inside_FocusArea) %>% dot_mappr(., "y", popup_value) +
+  tm_shape(Metro_Data_Inside_FocusArea) %>% dot_mappr(., 1, "Location") +
+  tm_shape(Data_Links_Inside_FocusArea) %>% line_mappr(., 2, 2, popup_lines) +
+  tm_shape(ATR_Data)  %>% line_mappr(., 8, 2, "ID")
+
+
+map_outside_FA_color =  tm_shape(Local_Data_Outside_Focus_Area) %>% dot_mappr(., "y", popup_value) +
+  tm_shape(Metro_Data_Outside_FocusArea) %>% dot_mappr(., 1, "Location") +
+  tm_shape(Data_Links_Outside_FocusArea) %>% line_mappr(., 2, 2, popup_lines) 
+
+map_pickup_color = tm_shape(Candidate_Local_Data) %>% dot_mappr(., "y", popup_value) +
+  tm_shape(Candidate_Local_Data_Links) %>% line_mappr(., 4, 2, popup_lines)
+
+master_plot_links_color = map_base_links + 
+  map_insde_FA_color + 
+  map_outside_FA_color  + 
+  map_pickup_color +
+  tm_add_legend(title = 'Year',
+                type = 'fill',
+                # legend.format=list(fun=function(x) formatC(x, digits=0, format="d"))
+                col = tmp_viridis,
+                labels  = levels(yolo$Year))
+
+lf_links_color = master_plot_links_color %>% 
+  tmap_leaflet() %>% 
+  leaflet::hideGroup(c("Local_Data_Outside_Focus_Area", 
+                       "ODOT_Data_Outside_FocusArea",
+                       "Metro_Data_Outside_FocusArea",
+                       "Data_Links_Outside_FocusArea",
+                       "Candidate_Local_Data",
+                       "Candidate_Local_Data_Links")) %>% 
+  leaflet::addMarkers(-122.603654, 45.364644, popup = "Abernethy Bridge")
+   
+
+
+#link extraction~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+QC_extracted_Links = CED_init_filter_and_agg %>%
+  .[Current_Status == "Kept"] %>%
+  .[Location %in% unique(kept_points_inside$Location) |
+      Location %in% unique(kept_points_outside_filter_pass$Location)] %>%
+  .[,c("SRC", "Location", 'Type', 'Road', 'Heading', "Intersection_Flow", "Directionality")] %>%
+  merge.data.table(.,link_count_locations %>%
+                     .[order(Distance, Location, -Link_Number)] %>%
+                     .[,-c("Touch")], by = "Location", allow.cartesian=TRUE) %>%
+  merge.data.table(., subarea_network %>%
+                     data.table() %>%
+                     .[, .(ID, Start, End, Primary_Direction, Secondary_Direction)],
+                   by.x = "Links", by.y = "ID") %>% 
+  # .[SRC != "ODOT"] %>%
+  unique() %>%
+  .[, .(Type, SRC, Location, Road, Directionality, Heading, Primary_Direction,
+        Intersection_Flow, Links,
+        Secondary_Direction, Distance, Link_Number, Start, End)] %>%
+  .[order(Location, Road, Heading)]
+
+QC_extracted_Links = bind_rows(QC_extracted_Links[Directionality == "Bidirectional"],
+          QC_extracted_Links %>%
+            .[Directionality != "Bidirectional" &
+                Heading == Primary_Direction])
+
+QC_extracted_Links %>%
+  fwrite("./output/QC/link_QC.csv")
+
+QC_extracted_Links_confirmed = fread("./output/QC/link_QC_confirmed.csv") %>% 
+  .[QC_link == "Y", .(Location, Road, Directionality, Heading, Intersection_Flow, Links, Start, End)] %>%
+  unique() %>% 
+  .[,`:=`(Sequence = 1)] %>%
+  .[,`:=`(Sequence = cumsum(Sequence)), by = .(Location, Road,
+                                               Heading, Intersection_Flow)] %>%
+  .[,`:=`(Sequence = paste0("Link_Number", Sequence))] 
+
+extracted_local_data_kept = CED_init_filter_and_agg %>%
+  .[Current_Status == "Kept"] %>%
+  .[Location %in% unique(QC_extracted_Links$Location)] %>%
+  merge.data.table(., QC_extracted_Links_confirmed,
+                   by = c("Location", "Road", "Directionality", "Heading", "Intersection_Flow")) %>%
+  .[, -c("SRC", "Type", 'Current_Status', 'Current_Status', 'Count_Fidelity', 'Veh_Data', 'Veh_Type',
+         'Current_time', 'Current_year')] %>%
+  .[,`:=`(year = year(Floor_Timestamp),
+          Hour = hour(Floor_Timestamp))] %>%
+  .[,`:=`(Hour = ifelse(Hour>12,
+                        paste0(Hour-12,"-",Hour-11, "pm"), 
+                        paste0(Hour,"-",Hour+1, "am")))] %>% 
+  .[,-c("Floor_Timestamp")] %>%
+  dcast.data.table(...~Hour, value.var = "Hourly_Counts") %>%  
+  .[,`:=`(focus = ifelse(Location %in% unique(kept_points_inside$Location), "2", "1"), 
+          supplier = "3", 
+          dirs = ifelse(Directionality == "Bidirectional", "2", "1"))] %>% 
+  setnames(old = c('Start', "End", "Links"), new = c("from", "to", "dynameq link id")) %>%  
+  .[,c(9, 10, 16:18, 13:15, 20, 21, 19, 12, 1, 8)]
+
+extracted_local_data_kept %>%
+  fwrite("./output/extracted_local_data_kept.csv")
+
+
+# CED_init_filter_and_agg$Floor_Timestamp %>%
+#   format("%I%p")
+# 
+# Data_Links_Inside_FocusArea_target = Data_Links_Inside_FocusArea %>%
+#   filter(ID %in% QC_extracted_Links$Links) %>%
+#   st_jitter(., factor = 0.00)
+# 
+# QC_MAP =  tm_shape(QC_Data_Inside_FocusArea) %>% dot_mappr(., 9, popup_dots) +
+#   tm_shape(Clackamas_Data_Inside_FocusArea) %>% dot_mappr(., 8, popup_dots) +
+#   tm_shape(ODOT_Data_Inside_FocusArea) %>% dot_mappr(., 6, popup_dots) +
+#   tm_shape(Data_Links_Inside_FocusArea_target) %>% line_mappr(., 1, 2, popup_lines) +
+#   tm_shape(Focus_Area) +
+#   tm_polygons(alpha = .3)
+# 
+# CED_init_filter_and_agg %>%  
+#   .[Location == "82ND DR NORTH OF JENNIFER", 
+#     .(Floor_Timestamp, Hourly_Counts)]
+# 
+# CED_init_filter_and_agg %>%  
+#   .[Location == "Pilkington Rd -- Jean Rd", 
+#     .(Floor_Timestamp, Road, Heading, Intersection_Flow, Hourly_Counts)] %>%  
+#   .[,.(sum(Hourly_Counts)), by = .(Floor_Timestamp, Intersection_Flow)]
+
+
+#reporting~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#TODO think about this a lot more
+
+# Kept_Extracted_Data@dat
+
+# yolo = bind_rows(Kept_Extracted_Data@data[,c("Location", "Current_Status", "Type")],
+#                  Dropped_Extracted_Data@data[,c("Location", "Current_Status", "Type")]) %>%  
+#   data.table() %>% 
+#   .[Location != ""]
+# 
+# yolo %>%  
+#   .[,.(Count = .N), by = .(Current_Status, Type)] %>%  
+#   ggplot() + 
+#   geom_col(aes(Current_Status, Count, fill = Type))
+# 
+# Extracted_Data_zones = bind_rows(intersect(Dropped_Extracted_Data, focus_area_poly)@data %>% 
+#                                             mutate(Zone_Location = "Inside focus area"),
+#                                           intersect(Dropped_Extracted_Data, Sub_Area)@data %>% 
+#                                             mutate(Zone_Location = "Inside sub-area"),
+#                                          intersect(Kept_Extracted_Data, focus_area_poly)@data %>% 
+#                                            mutate(Zone_Location = "Inside focus area"),
+#                                          intersect(Kept_Extracted_Data, Sub_Area)@data %>% 
+#                                            mutate(Zone_Location = "Inside sub-area")) %>% 
+#   data.table() %>% 
+#   .[,c("Location", "Current_Status", "Type", "Zone_Location")] %>%
+#   .[,`:=`(Source = "Extracted Source")]
+# 
+# Metro_Data_zones = bind_rows(intersect(Dropped_Metro_Data, focus_area_poly)@data %>% 
+#                                mutate(Zone_Location = "Inside focus area") %>% 
+#                                mutate(Current_Status = "Dropped"),
+#                              intersect(Dropped_Metro_Data, Sub_Area)@data %>% 
+#                                mutate(Zone_Location = "Inside sub-area") %>% 
+#                                mutate(Current_Status = "Dropped"),
+#                              intersect(Kept_Metro_Data, focus_area_poly)@data %>% 
+#                                mutate(Zone_Location = "Inside focus area") %>% 
+#                                mutate(Current_Status = "Kept"),
+#                              intersect(Kept_Metro_Data, Sub_Area)@data %>% 
+#                                mutate(Zone_Location = "Inside sub-area") %>% 
+#                                mutate(Current_Status = "Kept")) %>% 
+#   data.table() %>% 
+#   .[,c("ID", "Zone_Location", "Current_Status")] %>% 
+#   .[,`:=`(Source = "Metro")] %>%  
+#   setnames(old = "ID", new = "Location")
+# 
+# tmp = Extracted_Data_zones %>% 
+#   bind_rows(Metro_Data_zones)
+# 
+# tmp %>%  
+#   .[,.(Count = .N), by = .(Current_Status, Type)] %>%  
+#   ggplot() + 
+#   geom_col(aes(Current_Status, Count, fill = Type))
+# 
+# tmp %>%  
+#   .[,.(Count = .N), by = .(Source, Current_Status)] %>%  
+#   ggplot() + 
+#   geom_col(aes(Current_Status, Count, fill = Type))
+# 
+# 
+# #METRO DATA 
+# nrow(Metro) #total
+# nrow(Kept_Metro_Data) #kept
+# (nrow(Kept_Metro_Data)/nrow(Metro)) %>% 
+#   round(3)*100 #percentage
+# 
+# extracted_all = bind_rows(Dropped_Extracted_Data@data, 
+#           Kept_Extracted_Data@data) %>%  data.table()
+# 
+# #EXCTRACTED
+# nrow(extracted_all)
+# nrow(Kept_Extracted_Data)
+# (nrow(Kept_Extracted_Data)/nrow(extracted_all)) %>% 
+#   round(3)*100
+# 
+# #breakdowsn in the extracted data
+# #by source
+# combined_extracted_data %>% 
+#   .[,.(.N), by = SRC] %>%  
+#   .[,`:=`(Percent = 100*round(N/sum(N),3))] %>%
+#   .[order(-N)]
+# 
+# #by Type
+# extracted_all %>% 
+#   .[,.(.N), by = .(Type)] %>% 
+#   .[,`:=`(Percent = 100*round(N/sum(N),3))] %>%
+#   .[order(-N)]
+# 
+# # percent of the kept data that is currently in the focus area
+# (intersect(Kept_Extracted_Data, focus_area_poly)@data %>% 
+#   mutate(Zone_Location = "Inside focus area") %>%  
+#   nrow() / (nrow(Kept_Extracted_Data))) %>% 
+#   round(3)*100
+# 
+# 
+
+
+
+
+
+
+
